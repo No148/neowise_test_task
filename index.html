@@ -8,7 +8,11 @@
     body { max-width: 40rem; margin: 2rem auto; padding: 0 1rem; font: 1rem/1.5 system-ui, sans-serif; }
     textarea { box-sizing: border-box; display: block; width: 100%; margin: .5rem 0; padding: .5rem; font: inherit; }
     button { padding: .4rem .8rem; font: inherit; }
-    pre { white-space: pre-wrap; }
+    pre { white-space: pre-wrap; margin: 0; padding: .75rem; background: #f4f4f5; border-radius: .25rem; }
+    .notice { padding: .75rem; border-radius: .25rem; }
+    .notice.warning { background: #fff7e0; border: 1px solid #e0b84c; }
+    .notice.error { background: #fdecec; border: 1px solid #d97272; }
+    .hint { color: #555; font-size: .9rem; }
   </style>
 </head>
 <body>
@@ -18,18 +22,73 @@
     <textarea id="message" rows="4"></textarea>
     <button type="submit">Разобрать заявку</button>
   </form>
-  <pre id="result" aria-live="polite"></pre>
+
+  <section id="result" aria-live="polite">
+    <div id="ready" hidden>
+      <p><strong>Тема:</strong> <span id="topic"></span></p>
+      <p><strong>Черновик ответа:</strong></p>
+      <pre id="draft"></pre>
+      <p class="hint">Это черновик от AI. Проверьте его перед отправкой клиенту.</p>
+    </div>
+    <p id="notice" class="notice" hidden></p>
+  </section>
+
   <script type="module">
+    const TOPIC_LABELS = { delivery: "Доставка", pricing: "Стоимость", other: "Другое" };
+    const MESSAGES = {
+      manual_review: "AI не смог подготовить ответ. Разберите заявку вручную.",
+      invalid_input: "Введите текст заявки.",
+      error: "Не удалось связаться с сервером. Попробуйте ещё раз.",
+    };
+
     const form = document.querySelector("form");
-    const result = document.querySelector("#result");
+    const button = form.querySelector("button");
+    const ready = document.querySelector("#ready");
+    const topic = document.querySelector("#topic");
+    const draft = document.querySelector("#draft");
+    const notice = document.querySelector("#notice");
+
+    function clear() {
+      ready.hidden = true;
+      topic.textContent = "";
+      draft.textContent = "";
+      notice.hidden = true;
+      notice.textContent = "";
+    }
+
+    function showNotice(text, kind) {
+      notice.textContent = text;
+      notice.className = `notice ${kind}`;
+      notice.hidden = false;
+    }
+
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      const reply = await fetch("/api/triage", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: document.querySelector("#message").value }),
-      });
-      result.textContent = JSON.stringify(await reply.json(), null, 2);
+      clear();
+      button.disabled = true;
+      try {
+        const reply = await fetch("/api/triage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: document.querySelector("#message").value }),
+        });
+        const data = await reply.json();
+        if (data.status === "ready") {
+          topic.textContent = TOPIC_LABELS[data.topic] ?? data.topic;
+          draft.textContent = data.draft;
+          ready.hidden = false;
+        } else if (data.status === "manual_review") {
+          showNotice(MESSAGES.manual_review, "warning");
+        } else if (data.status === "invalid_input") {
+          showNotice(MESSAGES.invalid_input, "error");
+        } else {
+          showNotice(MESSAGES.error, "error");
+        }
+      } catch {
+        showNotice(MESSAGES.error, "error");
+      } finally {
+        button.disabled = false;
+      }
     });
   </script>
 </body>
